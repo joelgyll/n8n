@@ -1,9 +1,21 @@
 import jp from 'jsonpath';
-import { useDataSchema } from '@/composables/useDataSchema';
-import type { Schema } from '@/Interface';
+import { useDataSchema, useFlattenSchema } from '@/composables/useDataSchema';
+import type { IExecutionResponse, INodeUi, Schema } from '@/Interface';
+import { setActivePinia } from 'pinia';
+import { createTestingPinia } from '@pinia/testing';
+import {
+	NodeConnectionType,
+	type INodeExecutionData,
+	type ITaskDataConnections,
+} from 'n8n-workflow';
+import { useWorkflowsStore } from '@/stores/workflows.store';
+import type { JSONSchema7 } from 'json-schema';
+
+vi.mock('@/stores/workflows.store');
 
 describe('useDataSchema', () => {
 	const getSchema = useDataSchema().getSchema;
+
 	describe('getSchema', () => {
 		test.each([
 			[, { type: 'undefined', value: 'undefined', path: '' }],
@@ -523,5 +535,305 @@ describe('useDataSchema', () => {
 
 			expect(filterSchema(flatSchema, '')).toEqual(flatSchema);
 		});
+	});
+
+	describe('getNodeInputData', () => {
+		const getNodeInputData = useDataSchema().getNodeInputData;
+
+		beforeEach(() => {
+			setActivePinia(createTestingPinia());
+		});
+
+		afterEach(() => {
+			vi.clearAllMocks();
+		});
+
+		const name = 'a';
+		const makeMockData = (data: ITaskDataConnections | undefined, runDataKey?: string) => ({
+			data: {
+				resultData: {
+					runData: {
+						[runDataKey ?? name]: [{ data, startTime: 0, executionTime: 0, source: [] }],
+					},
+				},
+			},
+		});
+
+		const mockExecutionDataMarker = Symbol() as unknown as INodeExecutionData[];
+		const Main = NodeConnectionType.Main;
+
+		test.each<
+			[
+				[Partial<INodeUi> | null, number, number, Partial<IExecutionResponse> | null],
+				ReturnType<typeof getNodeInputData>,
+			]
+		>([
+			//
+			// Null / Out of Bounds Cases
+			//
+			[[null, 0, 0, null], []],
+			[[{ name }, 0, 0, null], []],
+			[[{ name }, 0, 0, { data: undefined }], []],
+			[[{ name }, 0, 0, { data: { resultData: { runData: {} } } }], []],
+			[[{ name }, 0, 0, { data: { resultData: { runData: { [name]: [] } } } }], []],
+			[[{ name }, 0, 0, makeMockData(undefined)], []],
+			[[{ name }, 1, 0, makeMockData({})], []],
+			[[{ name }, -1, 0, makeMockData({})], []],
+			[[{ name }, 0, 0, makeMockData({}, 'DIFFERENT_NAME')], []],
+			// getMainInputData cases
+			[[{ name }, 0, 0, makeMockData({ [Main]: [] })], []],
+			[[{ name }, 0, 0, makeMockData({ [Main]: [null] })], []],
+			[[{ name }, 0, 1, makeMockData({ [Main]: [null] })], []],
+			[[{ name }, 0, -1, makeMockData({ [Main]: [null] })], []],
+			[
+				[{ name }, 0, 0, makeMockData({ [Main]: [mockExecutionDataMarker] })],
+				mockExecutionDataMarker,
+			],
+			[
+				[{ name }, 0, 0, makeMockData({ [Main]: [mockExecutionDataMarker, null] })],
+				mockExecutionDataMarker,
+			],
+			[
+				[{ name }, 0, 1, makeMockData({ [Main]: [null, mockExecutionDataMarker] })],
+				mockExecutionDataMarker,
+			],
+			[
+				[
+					{ name },
+					0,
+					1,
+					makeMockData({ DIFFERENT_NAME: [], [Main]: [null, mockExecutionDataMarker] }),
+				],
+				mockExecutionDataMarker,
+			],
+			[
+				[
+					{ name },
+					2,
+					1,
+					{
+						data: {
+							resultData: {
+								runData: {
+									[name]: [
+										{
+											startTime: 0,
+											executionTime: 0,
+											source: [],
+										},
+										{
+											startTime: 0,
+											executionTime: 0,
+											source: [],
+										},
+										{
+											data: { [Main]: [null, mockExecutionDataMarker] },
+											startTime: 0,
+											executionTime: 0,
+											source: [],
+										},
+									],
+								},
+							},
+						},
+					},
+				],
+				mockExecutionDataMarker,
+			],
+		])(
+			'should return correct output %s',
+			([node, runIndex, outputIndex, getWorkflowExecution], output) => {
+				vi.mocked(useWorkflowsStore).mockReturnValue({
+					...useWorkflowsStore(),
+					getWorkflowExecution: getWorkflowExecution as IExecutionResponse,
+				});
+				expect(getNodeInputData(node as INodeUi, runIndex, outputIndex)).toEqual(output);
+			},
+		);
+	});
+
+	describe('getSchemaForJsonSchema', () => {
+		const getSchemaForJsonSchema = useDataSchema().getSchemaForJsonSchema;
+
+		it('should convert JSON schema to Schema type', () => {
+			const jsonSchema: JSONSchema7 = {
+				type: 'object',
+				properties: {
+					id: {
+						type: 'string',
+					},
+					email: {
+						type: 'string',
+					},
+					address: {
+						type: 'object',
+						properties: {
+							line1: {
+								type: 'string',
+							},
+							country: {
+								type: 'string',
+							},
+						},
+					},
+					tags: {
+						type: 'array',
+						items: { type: 'string' },
+					},
+					workspaces: {
+						type: 'array',
+						items: {
+							type: 'object',
+							properties: {
+								id: {
+									type: 'string',
+								},
+								name: {
+									type: 'string',
+								},
+							},
+							required: ['gid', 'name', 'resource_type'],
+						},
+					},
+				},
+				required: ['gid', 'email', 'name', 'photo', 'resource_type', 'workspaces'],
+			};
+
+			expect(getSchemaForJsonSchema(jsonSchema)).toEqual({
+				path: '',
+				type: 'object',
+				value: [
+					{
+						key: 'id',
+						path: '.id',
+						type: 'string',
+						value: '',
+					},
+					{
+						key: 'email',
+						path: '.email',
+						type: 'string',
+						value: '',
+					},
+					{
+						key: 'address',
+						path: '.address',
+						type: 'object',
+						value: [
+							{
+								key: 'line1',
+								path: '.address.line1',
+								type: 'string',
+								value: '',
+							},
+							{
+								key: 'country',
+								path: '.address.country',
+								type: 'string',
+								value: '',
+							},
+						],
+					},
+					{
+						key: 'tags',
+						path: '.tags',
+						type: 'array',
+						value: [
+							{
+								key: '0',
+								path: '.tags[0]',
+								type: 'string',
+								value: '',
+							},
+						],
+					},
+					{
+						key: 'workspaces',
+						path: '.workspaces',
+						type: 'array',
+						value: [
+							{
+								key: '0',
+								path: '.workspaces[0]',
+								type: 'object',
+								value: [
+									{
+										key: 'id',
+										path: '.workspaces[0].id',
+										type: 'string',
+										value: '',
+									},
+									{
+										key: 'name',
+										path: '.workspaces[0].name',
+										type: 'string',
+										value: '',
+									},
+								],
+							},
+						],
+					},
+				],
+			});
+		});
+	});
+});
+
+describe('useFlattenSchema', () => {
+	it('flattens a schema', () => {
+		const schema: Schema = {
+			path: '',
+			type: 'object',
+			value: [
+				{
+					key: 'obj',
+					path: '.obj',
+					type: 'object',
+					value: [
+						{
+							key: 'foo',
+							path: '.obj.foo',
+							type: 'object',
+							value: [
+								{
+									key: 'nested',
+									path: '.obj.foo.nested',
+									type: 'string',
+									value: 'bar',
+								},
+							],
+						},
+					],
+				},
+			],
+		};
+		expect(
+			useFlattenSchema().flattenSchema({
+				schema,
+			}).length,
+		).toBe(3);
+	});
+
+	it('items ids should be unique', () => {
+		const { flattenSchema } = useFlattenSchema();
+		const schema: Schema = {
+			path: '',
+			type: 'object',
+			value: [
+				{
+					key: 'index',
+					type: 'number',
+					value: '0',
+					path: '.index',
+				},
+			],
+		};
+		const node1 = { name: 'First Node', type: 'any' };
+		const node2 = { name: 'Second Node', type: 'any' };
+
+		const node1Schema = flattenSchema({ schema, node: node1, depth: 1 });
+		const node2Schema = flattenSchema({ schema, node: node2, depth: 1 });
+
+		expect(node1Schema[0].id).not.toBe(node2Schema[0].id);
 	});
 });

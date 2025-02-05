@@ -7,6 +7,7 @@ import {
 	COMMUNITY_PACKAGE_INSTALL_MODAL_KEY,
 	CONTACT_PROMPT_MODAL_KEY,
 	CREDENTIAL_EDIT_MODAL_KEY,
+	API_KEY_CREATE_OR_EDIT_MODAL_KEY,
 	CREDENTIAL_SELECT_MODAL_KEY,
 	DELETE_USER_MODAL_KEY,
 	DUPLICATE_MODAL_KEY,
@@ -18,7 +19,6 @@ import {
 	NEW_ASSISTANT_SESSION_MODAL,
 	VERSIONS_MODAL_KEY,
 	WORKFLOW_ACTIVE_MODAL_KEY,
-	WORKFLOW_LM_CHAT_MODAL_KEY,
 	WORKFLOW_SETTINGS_MODAL_KEY,
 	WORKFLOW_SHARE_MODAL_KEY,
 	IMPORT_CURL_MODAL_KEY,
@@ -51,11 +51,11 @@ import WorkflowTagsManager from '@/components/TagsManager/WorkflowTagsManager.vu
 import AnnotationTagsManager from '@/components/TagsManager/AnnotationTagsManager.ee.vue';
 import UpdatesPanel from '@/components/UpdatesPanel.vue';
 import NpsSurvey from '@/components/NpsSurvey.vue';
-import WorkflowLMChat from '@/components/WorkflowLMChat/WorkflowLMChat.vue';
 import WorkflowSettings from '@/components/WorkflowSettings.vue';
 import DeleteUserModal from '@/components/DeleteUserModal.vue';
 import ActivationModal from '@/components/ActivationModal.vue';
 import ImportCurlModal from '@/components/ImportCurlModal.vue';
+import ApiKeyCreateOrEditModal from '@/components/ApiKeyCreateOrEditModal.vue';
 import MfaSetupModal from '@/components/MfaSetupModal.vue';
 import WorkflowShareModal from '@/components/WorkflowShareModal.ee.vue';
 import EventDestinationSettingsModal from '@/components/SettingsLogStreaming/EventDestinationSettingsModal.ee.vue';
@@ -85,6 +85,21 @@ import type { EventBus } from 'n8n-design-system';
 				<CredentialEdit :modal-name="modalName" :mode="mode" :active-id="activeId" />
 			</template>
 		</ModalRoot>
+
+		<ModalRoot :name="API_KEY_CREATE_OR_EDIT_MODAL_KEY">
+			<template
+				#default="{
+					modalName,
+					data: { mode, activeId },
+				}: {
+					modalName: string;
+					data: { mode: 'new' | 'edit'; activeId: string };
+				}"
+			>
+				<ApiKeyCreateOrEditModal :modal-name="modalName" :mode="mode" :active-id="activeId" />
+			</template>
+		</ModalRoot>
+
 		<ModalRoot :name="ABOUT_MODAL_KEY">
 			<AboutModal />
 		</ModalRoot>
@@ -123,10 +138,6 @@ import type { EventBus } from 'n8n-design-system';
 			<template #default="{ active }">
 				<NpsSurvey :is-active="active" />
 			</template>
-		</ModalRoot>
-
-		<ModalRoot :name="WORKFLOW_LM_CHAT_MODAL_KEY">
-			<WorkflowLMChat />
 		</ModalRoot>
 
 		<ModalRoot :name="WORKFLOW_SETTINGS_MODAL_KEY">

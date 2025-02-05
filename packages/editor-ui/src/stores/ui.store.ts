@@ -16,6 +16,7 @@ import {
 	LOG_STREAM_MODAL_KEY,
 	MFA_SETUP_MODAL_KEY,
 	PERSONALIZATION_MODAL_KEY,
+	NODE_PINNING_MODAL_KEY,
 	STORES,
 	TAGS_MANAGER_MODAL_KEY,
 	ANNOTATION_TAGS_MANAGER_MODAL_KEY,
@@ -23,7 +24,6 @@ import {
 	VERSIONS_MODAL_KEY,
 	VIEWS,
 	WORKFLOW_ACTIVE_MODAL_KEY,
-	WORKFLOW_LM_CHAT_MODAL_KEY,
 	WORKFLOW_SETTINGS_MODAL_KEY,
 	WORKFLOW_SHARE_MODAL_KEY,
 	EXTERNAL_SECRETS_PROVIDER_MODAL_KEY,
@@ -36,6 +36,7 @@ import {
 	NEW_ASSISTANT_SESSION_MODAL,
 	PROMPT_MFA_CODE_MODAL_KEY,
 	COMMUNITY_PLUS_ENROLLMENT_MODAL,
+	API_KEY_CREATE_OR_EDIT_MODAL_KEY,
 } from '@/constants';
 import type {
 	INodeUi,
@@ -46,6 +47,7 @@ import type {
 	NotificationOptions,
 	ModalState,
 	ModalKey,
+	AppliedThemeOption,
 } from '@/Interface';
 import { defineStore } from 'pinia';
 import { useRootStore } from '@/stores/root.store';
@@ -54,7 +56,7 @@ import { useWorkflowsStore } from '@/stores/workflows.store';
 import { useSettingsStore } from '@/stores/settings.store';
 import { useUsersStore } from '@/stores/users.store';
 import { dismissBannerPermanently } from '@/api/ui';
-import type { BannerName } from 'n8n-workflow';
+import type { BannerName } from '@n8n/api-types';
 import {
 	addThemeToBody,
 	getPreferredTheme,
@@ -64,6 +66,7 @@ import {
 } from './ui.utils';
 import { computed, ref } from 'vue';
 import type { Connection } from '@vue-flow/core';
+import { useLocalStorage } from '@vueuse/core';
 
 let savedTheme: ThemeOption = 'system';
 
@@ -99,12 +102,12 @@ export const useUIStore = defineStore(STORES.UI, () => {
 				CREDENTIAL_SELECT_MODAL_KEY,
 				DUPLICATE_MODAL_KEY,
 				PERSONALIZATION_MODAL_KEY,
+				NODE_PINNING_MODAL_KEY,
 				INVITE_USER_MODAL_KEY,
 				TAGS_MANAGER_MODAL_KEY,
 				ANNOTATION_TAGS_MANAGER_MODAL_KEY,
 				NPS_SURVEY_MODAL_KEY,
 				VERSIONS_MODAL_KEY,
-				WORKFLOW_LM_CHAT_MODAL_KEY,
 				WORKFLOW_SETTINGS_MODAL_KEY,
 				WORKFLOW_SHARE_MODAL_KEY,
 				WORKFLOW_ACTIVE_MODAL_KEY,
@@ -141,6 +144,13 @@ export const useUIStore = defineStore(STORES.UI, () => {
 			open: false,
 			data: undefined,
 		},
+		[API_KEY_CREATE_OR_EDIT_MODAL_KEY]: {
+			open: false,
+			data: {
+				activeId: null,
+				mode: '',
+			},
+		},
 		[CREDENTIAL_EDIT_MODAL_KEY]: {
 			open: false,
 			mode: '',
@@ -150,7 +160,8 @@ export const useUIStore = defineStore(STORES.UI, () => {
 	});
 
 	const modalStack = ref<string[]>([]);
-	const sidebarMenuCollapsed = ref<boolean>(true);
+	const sidebarMenuCollapsedPreference = useLocalStorage<boolean>('sidebar.collapsed', false);
+	const sidebarMenuCollapsed = ref<boolean>(sidebarMenuCollapsedPreference.value);
 	const currentView = ref<string>('');
 	const draggable = ref<Draggable>({
 		isDragging: false,
@@ -172,6 +183,7 @@ export const useUIStore = defineStore(STORES.UI, () => {
 	const bannersHeight = ref<number>(0);
 	const bannerStack = ref<BannerName[]>([]);
 	const pendingNotificationsForViews = ref<{ [key in VIEWS]?: NotificationOptions[] }>({});
+	const processingExecutionResults = ref<boolean>(false);
 
 	const appGridWidth = ref<number>(0);
 
@@ -186,16 +198,15 @@ export const useUIStore = defineStore(STORES.UI, () => {
 	const rootStore = useRootStore();
 	const userStore = useUsersStore();
 
-	const appliedTheme = computed(() => {
-		return theme.value === 'system' ? getPreferredTheme() : theme.value;
+	// Keep track of the preferred theme and update it when the system preference changes
+	const preferredTheme = getPreferredTheme();
+	const preferredSystemTheme = ref<AppliedThemeOption>(preferredTheme.theme);
+	preferredTheme.mediaQuery?.addEventListener('change', () => {
+		preferredSystemTheme.value = getPreferredTheme().theme;
 	});
 
-	const logo = computed(() => {
-		const { releaseChannel } = settingsStore.settings;
-		const suffix = appliedTheme.value === 'dark' ? '-dark.svg' : '.svg';
-		return `static/logo/${
-			releaseChannel === 'stable' ? 'expanded' : `channel/${releaseChannel}`
-		}${suffix}`;
+	const appliedTheme = computed(() => {
+		return theme.value === 'system' ? preferredSystemTheme.value : theme.value;
 	});
 
 	const contextBasedTranslationKeys = computed(() => {
@@ -326,6 +337,12 @@ export const useUIStore = defineStore(STORES.UI, () => {
 	const isAnyModalOpen = computed(() => {
 		return modalStack.value.length > 0;
 	});
+
+	/**
+	 * Whether we are currently in the process of fetching and deserializing
+	 * the full execution data and loading it to the store.
+	 */
+	const isProcessingExecutionResults = computed(() => processingExecutionResults.value);
 
 	// Methods
 
@@ -502,7 +519,9 @@ export const useUIStore = defineStore(STORES.UI, () => {
 	};
 
 	const toggleSidebarMenuCollapse = () => {
-		sidebarMenuCollapsed.value = !sidebarMenuCollapsed.value;
+		const newCollapsedState = !sidebarMenuCollapsed.value;
+		sidebarMenuCollapsedPreference.value = newCollapsedState;
+		sidebarMenuCollapsed.value = newCollapsedState;
 	};
 
 	const getCurlToJson = async (curlCommand: string) => {
@@ -562,10 +581,17 @@ export const useUIStore = defineStore(STORES.UI, () => {
 		lastCancelledConnectionPosition.value = undefined;
 	}
 
+	/**
+	 * Set whether we are currently in the process of fetching and deserializing
+	 * the full execution data and loading it to the store.
+	 */
+	const setProcessingExecutionResults = (value: boolean) => {
+		processingExecutionResults.value = value;
+	};
+
 	return {
 		appGridWidth,
 		appliedTheme,
-		logo,
 		contextBasedTranslationKeys,
 		getLastSelectedNode,
 		isVersionsOpen,
@@ -593,6 +619,7 @@ export const useUIStore = defineStore(STORES.UI, () => {
 		nodeViewInitialized,
 		addFirstStepOnLoad,
 		sidebarMenuCollapsed,
+		sidebarMenuCollapsedPreference,
 		bannerStack,
 		theme,
 		modalsById,
@@ -600,6 +627,7 @@ export const useUIStore = defineStore(STORES.UI, () => {
 		isAnyModalOpen,
 		pendingNotificationsForViews,
 		activeModals,
+		isProcessingExecutionResults,
 		setTheme,
 		setMode,
 		setActiveId,
@@ -634,6 +662,7 @@ export const useUIStore = defineStore(STORES.UI, () => {
 		setNotificationsForView,
 		deleteNotificationsForView,
 		resetLastInteractedWith,
+		setProcessingExecutionResults,
 	};
 });
 

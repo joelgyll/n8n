@@ -2,12 +2,13 @@ import type {
 	FormFieldsParameter,
 	IExecuteFunctions,
 	INodeExecutionData,
+	INodeProperties,
 	INodeTypeDescription,
 	IWebhookFunctions,
+	IWebhookResponseData,
 	NodeTypeAndVersion,
 } from 'n8n-workflow';
 import {
-	WAIT_TIME_UNLIMITED,
 	Node,
 	updateDisplayOptions,
 	NodeOperationError,
@@ -15,11 +16,52 @@ import {
 	FORM_TRIGGER_NODE_TYPE,
 	tryToParseJsonToFormFields,
 	NodeConnectionType,
-	WAIT_NODE_TYPE,
+	WAIT_INDEFINITELY,
 } from 'n8n-workflow';
 
+import { renderFormCompletion } from './formCompletionUtils';
+import { renderFormNode } from './formNodeUtils';
 import { formDescription, formFields, formTitle } from '../Form/common.descriptions';
-import { prepareFormReturnItem, renderForm, resolveRawData } from '../Form/utils';
+import { prepareFormReturnItem, resolveRawData } from '../Form/utils';
+
+export const formFieldsProperties: INodeProperties[] = [
+	{
+		displayName: 'Define Form',
+		name: 'defineForm',
+		type: 'options',
+		noDataExpression: true,
+		options: [
+			{
+				name: 'Using Fields Below',
+				value: 'fields',
+			},
+			{
+				name: 'Using JSON',
+				value: 'json',
+			},
+		],
+		default: 'fields',
+	},
+	{
+		displayName: 'Form Fields',
+		name: 'jsonOutput',
+		type: 'json',
+		typeOptions: {
+			rows: 5,
+		},
+		default:
+			'[\n   {\n      "fieldLabel":"Name",\n      "placeholder":"enter you name",\n      "requiredField":true\n   },\n   {\n      "fieldLabel":"Age",\n      "fieldType":"number",\n      "placeholder":"enter your age"\n   },\n   {\n      "fieldLabel":"Email",\n      "fieldType":"email",\n      "requiredField":true\n   }\n]',
+		validateType: 'form-fields',
+		ignoreValidationDuringExecution: true,
+		hint: '<a href="hhttps://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.form/" target="_blank">See docs</a> for field syntax',
+		displayOptions: {
+			show: {
+				defineForm: ['json'],
+			},
+		},
+	},
+	{ ...formFields, displayOptions: { show: { defineForm: ['fields'] } } },
+];
 
 const pageProperties = updateDisplayOptions(
 	{
@@ -28,42 +70,7 @@ const pageProperties = updateDisplayOptions(
 		},
 	},
 	[
-		{
-			displayName: 'Define Form',
-			name: 'defineForm',
-			type: 'options',
-			noDataExpression: true,
-			options: [
-				{
-					name: 'Using Fields Below',
-					value: 'fields',
-				},
-				{
-					name: 'Using JSON',
-					value: 'json',
-				},
-			],
-			default: 'fields',
-		},
-		{
-			displayName: 'Form Fields',
-			name: 'jsonOutput',
-			type: 'json',
-			typeOptions: {
-				rows: 5,
-			},
-			default:
-				'[\n   {\n      "fieldLabel":"Name",\n      "placeholder":"enter you name",\n      "requiredField":true\n   },\n   {\n      "fieldLabel":"Age",\n      "fieldType":"number",\n      "placeholder":"enter your age"\n   },\n   {\n      "fieldLabel":"Email",\n      "fieldType":"email",\n      "requiredField":true\n   }\n]',
-			validateType: 'form-fields',
-			ignoreValidationDuringExecution: true,
-			hint: '<a href="hhttps://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.form/" target="_blank">See docs</a> for field syntax',
-			displayOptions: {
-				show: {
-					defineForm: ['json'],
-				},
-			},
-		},
-		{ ...formFields, displayOptions: { show: { defineForm: ['fields'] } } },
+		...formFieldsProperties,
 		{
 			displayName: 'Options',
 			name: 'options',
@@ -108,6 +115,11 @@ const completionProperties = updateDisplayOptions(
 					value: 'redirect',
 					description: 'Redirect the user to a URL',
 				},
+				{
+					name: 'Show Text',
+					value: 'showText',
+					description: 'Display simple text or HTML',
+				},
 			],
 		},
 		{
@@ -148,6 +160,22 @@ const completionProperties = updateDisplayOptions(
 					respondWith: ['text'],
 				},
 			},
+		},
+		{
+			displayName: 'Text',
+			name: 'responseText',
+			type: 'string',
+			displayOptions: {
+				show: {
+					respondWith: ['showText'],
+				},
+			},
+			typeOptions: {
+				rows: 2,
+			},
+			default: '',
+			placeholder: 'e.g. Thanks for filling the form',
+			description: 'The text to display on the page. Use HTML to show a customized web page.',
 		},
 		{
 			displayName: 'Options',
@@ -230,7 +258,7 @@ export class Form extends Node {
 		],
 	};
 
-	async webhook(context: IWebhookFunctions) {
+	async webhook(context: IWebhookFunctions): Promise<IWebhookResponseData> {
 		const res = context.getResponseObject();
 
 		const operation = context.getNodeParameter('operation', '') as string;
@@ -261,112 +289,31 @@ export class Form extends Node {
 				});
 			}
 		} else {
-			fields = context.getNodeParameter('formFields.values', []) as FormFieldsParameter;
+			fields = (context.getNodeParameter('formFields.values', []) as FormFieldsParameter).map(
+				(field) => {
+					if (field.fieldType === 'hiddenField') {
+						field.fieldLabel = field.fieldName as string;
+					}
+
+					return field;
+				},
+			);
 		}
 
 		const method = context.getRequestObject().method;
 
-		if (operation === 'completion') {
-			const respondWith = context.getNodeParameter('respondWith', '') as string;
+		if (operation === 'completion' && method === 'GET') {
+			return await renderFormCompletion(context, res, trigger);
+		}
 
-			if (respondWith === 'redirect') {
-				const redirectUrl = context.getNodeParameter('redirectUrl', '') as string;
-				res.redirect(redirectUrl);
-				return {
-					noWebhookResponse: true,
-				};
-			}
-
-			const completionTitle = context.getNodeParameter('completionTitle', '') as string;
-			const completionMessage = context.getNodeParameter('completionMessage', '') as string;
-			const options = context.getNodeParameter('options', {}) as {
-				formTitle: string;
-			};
-			let title = options.formTitle;
-			if (!title) {
-				title = context.evaluateExpression(
-					`{{ $('${trigger?.name}').params.formTitle }}`,
-				) as string;
-			}
-			const appendAttribution = context.evaluateExpression(
-				`{{ $('${trigger?.name}').params.options?.appendAttribution === false ? false : true }}`,
-			) as boolean;
-
-			res.render('form-trigger-completion', {
-				title: completionTitle,
-				message: completionMessage,
-				formTitle: title,
-				appendAttribution,
-			});
-
+		if (operation === 'completion' && method === 'POST') {
 			return {
-				noWebhookResponse: true,
+				workflowData: [context.evaluateExpression('{{ $input.all() }}') as INodeExecutionData[]],
 			};
 		}
 
 		if (method === 'GET') {
-			const options = context.getNodeParameter('options', {}) as {
-				formTitle: string;
-				formDescription: string;
-				buttonLabel: string;
-			};
-
-			let title = options.formTitle;
-			if (!title) {
-				title = context.evaluateExpression(
-					`{{ $('${trigger?.name}').params.formTitle }}`,
-				) as string;
-			}
-
-			let description = options.formDescription;
-			if (!description) {
-				description = context.evaluateExpression(
-					`{{ $('${trigger?.name}').params.formDescription }}`,
-				) as string;
-			}
-
-			let buttonLabel = options.buttonLabel;
-			if (!buttonLabel) {
-				buttonLabel =
-					(context.evaluateExpression(
-						`{{ $('${trigger?.name}').params.options?.buttonLabel }}`,
-					) as string) || 'Submit';
-			}
-
-			const responseMode = 'onReceived';
-
-			let redirectUrl;
-
-			const connectedNodes = context.getChildNodes(context.getNode().name);
-
-			const hasNextPage = connectedNodes.some(
-				(node) => node.type === FORM_NODE_TYPE || node.type === WAIT_NODE_TYPE,
-			);
-
-			if (hasNextPage) {
-				redirectUrl = context.evaluateExpression('{{ $execution.resumeFormUrl }}') as string;
-			}
-
-			const appendAttribution = context.evaluateExpression(
-				`{{ $('${trigger?.name}').params.options?.appendAttribution === false ? false : true }}`,
-			) as boolean;
-
-			renderForm({
-				context,
-				res,
-				formTitle: title,
-				formDescription: description,
-				formFields: fields,
-				responseMode,
-				mode,
-				redirectUrl,
-				appendAttribution,
-				buttonLabel,
-			});
-
-			return {
-				noWebhookResponse: true,
-			};
+			return await renderFormNode(context, res, trigger, fields, mode);
 		}
 
 		let useWorkflowTimezone = context.evaluateExpression(
@@ -412,10 +359,7 @@ export class Form extends Node {
 			);
 		}
 
-		if (operation !== 'completion') {
-			const waitTill = new Date(WAIT_TIME_UNLIMITED);
-			await context.putExecutionToWait(waitTill);
-		}
+		await context.putExecutionToWait(WAIT_INDEFINITELY);
 
 		return [context.getInputData()];
 	}

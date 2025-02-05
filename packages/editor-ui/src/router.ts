@@ -18,12 +18,15 @@ import type { RouterMiddleware } from '@/types/router';
 import { initializeAuthenticatedFeatures, initializeCore } from '@/init';
 import { tryToParseNumber } from '@/utils/typesUtils';
 import { projectsRoutes } from '@/routes/projects.routes';
+import TestDefinitionRunsListView from './views/TestDefinition/TestDefinitionRunsListView.vue';
+import TestDefinitionRunDetailView from './views/TestDefinition/TestDefinitionRunDetailView.vue';
 
 const ChangePasswordView = async () => await import('./views/ChangePasswordView.vue');
 const ErrorView = async () => await import('./views/ErrorView.vue');
 const ForgotMyPasswordView = async () => await import('./views/ForgotMyPasswordView.vue');
 const MainHeader = async () => await import('@/components/MainHeader/MainHeader.vue');
 const MainSidebar = async () => await import('@/components/MainSidebar.vue');
+const CanvasChat = async () => await import('@/components/CanvasChat/CanvasChat.vue');
 const NodeView = async () => await import('@/views/NodeViewSwitcher.vue');
 const WorkflowExecutionsView = async () => await import('@/views/WorkflowExecutionsView.vue');
 const WorkflowExecutionsLandingPage = async () =>
@@ -56,6 +59,12 @@ const SettingsExternalSecrets = async () => await import('./views/SettingsExtern
 const WorkerView = async () => await import('./views/WorkerView.vue');
 const WorkflowHistory = async () => await import('@/views/WorkflowHistory.vue');
 const WorkflowOnboardingView = async () => await import('@/views/WorkflowOnboardingView.vue');
+const TestDefinitionListView = async () =>
+	await import('./views/TestDefinition/TestDefinitionListView.vue');
+const TestDefinitionEditView = async () =>
+	await import('./views/TestDefinition/TestDefinitionEditView.vue');
+const TestDefinitionRootView = async () =>
+	await import('./views/TestDefinition/TestDefinitionRootView.vue');
 
 function getTemplatesRedirect(defaultRedirect: VIEWS[keyof VIEWS]): { name: string } | false {
 	const settingsStore = useSettingsStore();
@@ -249,6 +258,75 @@ export const routes: RouteRecordRaw[] = [
 		],
 	},
 	{
+		path: '/workflow/:name/evaluation',
+		components: {
+			default: TestDefinitionRootView,
+			header: MainHeader,
+			sidebar: MainSidebar,
+		},
+		meta: {
+			keepWorkflowAlive: true,
+			middleware: ['authenticated'],
+		},
+		children: [
+			{
+				path: '',
+				name: VIEWS.TEST_DEFINITION,
+				components: {
+					default: TestDefinitionListView,
+				},
+				meta: {
+					keepWorkflowAlive: true,
+					middleware: ['authenticated'],
+				},
+			},
+			{
+				path: 'new',
+				name: VIEWS.NEW_TEST_DEFINITION,
+				components: {
+					default: TestDefinitionEditView,
+				},
+				meta: {
+					keepWorkflowAlive: true,
+					middleware: ['authenticated'],
+				},
+			},
+			{
+				path: ':testId',
+				name: VIEWS.TEST_DEFINITION_EDIT,
+				components: {
+					default: TestDefinitionEditView,
+				},
+				meta: {
+					keepWorkflowAlive: true,
+					middleware: ['authenticated'],
+				},
+			},
+			{
+				path: ':testId/runs',
+				name: VIEWS.TEST_DEFINITION_RUNS,
+				components: {
+					default: TestDefinitionRunsListView,
+				},
+				meta: {
+					keepWorkflowAlive: true,
+					middleware: ['authenticated'],
+				},
+			},
+			{
+				path: ':testId/runs/:runId',
+				name: VIEWS.TEST_DEFINITION_RUNS_DETAIL,
+				components: {
+					default: TestDefinitionRunDetailView,
+				},
+				meta: {
+					keepWorkflowAlive: true,
+					middleware: ['authenticated'],
+				},
+			},
+		],
+	},
+	{
 		path: '/workflow/:workflowId/history/:versionId?',
 		name: VIEWS.WORKFLOW_HISTORY,
 		components: {
@@ -301,6 +379,7 @@ export const routes: RouteRecordRaw[] = [
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
+			footer: CanvasChat,
 		},
 		meta: {
 			nodeView: true,
@@ -333,6 +412,7 @@ export const routes: RouteRecordRaw[] = [
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
+			footer: CanvasChat,
 		},
 		meta: {
 			nodeView: true,
@@ -424,8 +504,16 @@ export const routes: RouteRecordRaw[] = [
 	},
 	{
 		path: '/settings',
+		name: VIEWS.SETTINGS,
 		component: SettingsView,
 		props: true,
+		redirect: () => {
+			const settingsStore = useSettingsStore();
+			if (settingsStore.settings.hideUsagePage) {
+				return { name: VIEWS.PERSONAL_SETTINGS };
+			}
+			return { name: VIEWS.USAGE };
+		},
 		children: [
 			{
 				path: 'usage',

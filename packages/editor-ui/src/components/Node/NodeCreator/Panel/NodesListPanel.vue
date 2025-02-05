@@ -6,6 +6,7 @@ import {
 	AI_NODE_CREATOR_VIEW,
 	REGULAR_NODE_CREATOR_VIEW,
 	TRIGGER_NODE_CREATOR_VIEW,
+	AI_UNCATEGORIZED_CATEGORY,
 } from '@/constants';
 
 import { useNodeCreatorStore } from '@/stores/nodeCreator.store';
@@ -95,6 +96,7 @@ watch(
 			[REGULAR_NODE_CREATOR_VIEW]: RegularView,
 			[AI_NODE_CREATOR_VIEW]: AIView,
 			[AI_OTHERS_NODE_CREATOR_VIEW]: AINodesView,
+			[AI_UNCATEGORIZED_CATEGORY]: AINodesView,
 		};
 
 		const itemKey = selectedView;
@@ -176,9 +178,7 @@ function onBackButton() {
 				v-if="activeViewStack.hasSearch"
 				:class="$style.searchBar"
 				:placeholder="
-					searchPlaceholder
-						? searchPlaceholder
-						: $locale.baseText('nodeCreator.searchBar.searchNodes')
+					searchPlaceholder ? searchPlaceholder : i18n.baseText('nodeCreator.searchBar.searchNodes')
 				"
 				:model-value="activeViewStack.search"
 				@update:model-value="onSearch"
@@ -262,7 +262,7 @@ function onBackButton() {
 	height: 100%;
 	background-color: $node-creator-background-color;
 	--color-background-node-icon-badge: var(--color-background-xlight);
-	width: 385px;
+	width: var(--node-creator-width);
 	display: flex;
 	flex-direction: column;
 
@@ -305,6 +305,7 @@ function onBackButton() {
 	line-height: 24px;
 	font-weight: var(--font-weight-bold);
 	font-size: var(--font-size-l);
+	margin: 0;
 
 	.hasBg & {
 		font-size: var(--font-size-s-m);
